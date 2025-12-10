@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>خمن الكلمة — Sandooq</title>
+  <style>
+    :root{
+      --bg:#07111a; --tile:#0f1720; --text:#e6eef5; --muted:#9aa7b3;
+      --absent:#4b5563; --present:#f59e0b; --correct:#16a34a;
+      --kbd:#0b1220; --danger:#dc2626; --success:#16a34a;
+      font-family: "Segoe UI", "Noto Naskh Arabic", Roboto, Arial, sans-serif;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; padding:0; min-height:100%; background:linear-gradient(180deg,#071426 0%, #07111a 100%);
+      color:var(--text); display:flex; align-items:center; justify-content:center;
+    }
+    .wrap{ width:100%; max-width:640px; padding:16px; }
+    header{ display:flex; align-items:center; gap:12px; margin-bottom:12px; justify-content:space-between }
+    .brand{ display:flex; align-items:center; gap:12px; }
+    .brand svg{ width:64px; height:64px; border-radius:10px; background:transparent; }
+    .title h1{ margin:0; font-size:20px; text-align:right; }
+    .title p{ margin:0; color:var(--muted); font-size:13px; text-align:right; }
+
+    #board{ background: linear-gradient(180deg, rgba(255,255,255,0.01), transparent); padding:12px; border-radius:12px; }
+    .row{ display:grid; grid-template-columns: repeat(5, 1fr); gap:10px; margin-bottom:10px; }
+    .tile{
+      aspect-ratio:1/1; border-radius:10px; display:flex; align-items:center; justify-content:center;
+      background:var(--tile); font-weight:800; font-size:clamp(20px,6vw,34px); color:var(--text);
+      user-select:none;
+    }
+    .tile.filled{ box-shadow: inset 0 -2px 0 rgba(0,0,0,0.25); }
+    .tile.absent{ background:var(--absent); color:#fff; }
+    .tile.present{ background:var(--present); color:#07111a; }
+    .tile.correct{ background:var(--correct); color:#07111a; }
+
+    .keyboard{ margin-top:12px; display:flex; flex-direction:column; gap:8px; align-items:center; }
+    .krow{ display:flex; gap:8px; width:100%; justify-content:center; }
+    .kbkey{
+      padding:10px 8px; min-width:40px; border-radius:8px; background:var(--kbd); color:var(--text);
+      text-align:center; cursor:pointer; user-select:none; font-weight:700;
+      box-shadow: 0 3px 0 rgba(0,0,0,0.3);
+    }
+    .kbkey.big{ min-width:84px; padding:10px 14px; border-radius:10px; }
+    .kbkey.absent{ background:var(--absent); color:#fff; }
+    .kbkey.present{ background:var(--present); color:#07111a; }
+    .kbkey.correct{ background:var(--correct); color:#07111a; }
+    .kbkey.delete{ background:var(--danger); color:#fff; }
+    .kbkey.enter{ background:var(--success); color:#07111a; }
+
+    .controls{ display:flex; gap:8px; align-items:center; }
+    .toast{
+      position:fixed; top:18px; left:50%; transform:translateX(-50%); background:rgba(10,10,12,0.9);
+      color:#fff; padding:10px 14px; border-radius:8px; box-shadow:0 8px 22px rgba(0,0,0,0.6); display:none;
+    }
+    footer{ color:var(--muted); margin-top:12px; font-size:13px; text-align:center; }
+
+    @media (max-width:420px){
+      .brand svg{ width:52px; height:52px; } .kbkey{ min-width:32px; padding:8px 6px; }
+      .kbkey.big{ min-width:64px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand" aria-hidden="false">
+        <!-- شعار مدمج -->
+        <svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="شعار صندوق">
+          <rect rx="36" width="512" height="512" fill="#ffd54a"/>
+          <rect x="48" y="112" width="416" height="256" rx="20" fill="#ffd54a" stroke="#1f4aa0" stroke-width="10"/>
+          <g transform="translate(0,360)">
+            <rect x="32" y="-8" width="448" height="120" rx="12" fill="rgba(0,0,0,0.05)"/>
+            <text x="256" y="62" font-family="Noto Naskh Arabic, Arial" font-size="36" text-anchor="middle" fill="#1f4aa0">صندوق</text>
+            <text x="256" y="100" font-family="Noto Naskh Arabic, Arial" font-size="22" text-anchor="middle" fill="#ffb74d">المسابقات</text>
+          </g>
+        </svg>
+        <div class="title">
+          <h1>خمن الكلمة</h1>
+          <p>خمن كلمة من 5 أحرف — لديك 6 محاولات</p>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button id="restart" class="kbkey big" title="إعادة">إعادة</button>
+      </div>
+    </header>
+
+    <main>
+      <div id="board" aria-label="لوحة اللعب" role="application"></div>
+
+      <div id="keyboard" class="keyboard" aria-label="لوحة المفاتيح"></div>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <footer>Sandooq — صندوق المسابقات</footer>
+  </div>
+
+  <script>
+    // ======= إعداد اللعبة (يمكن تعديل الكلمات هنا) =======
+    const WORD_LENGTH = 5;
+    const MAX_GUESSES = 6;
+
+    // قائمة كلمات عربية (كل كلمة سنأخذ أول 5 أحرف منها إذا احتاج)
+    const WORDS = [
+      "مدينة","جميلة","مدرسة","نهاية","صندوق","مفتاح","طاولة","حديقة","قلمنا","كتابي",
+      "جريدة","سيارة","هاتفك","مطبخ","تفاحة","صديقي","نافذة","حقيبة","طبيبك","حدود",
+      "نسخة","قهوة","بداية","حقيقة","صوتنا","قدرة","بحرية","رائحة","نقود","محبة",
+      "صحراء","قميص","نجمة","مزرعة","قطار","رجلان","صديق","ميزان","زهرة","ملابس",
+      "كوخنا","قطعة","صناعة","حديثة","محرك","ميدان","عيادة","غرفة","قبعة","ممتاز",
+      "لغة","موسيقى","تمرين","هدية","زجاجة","صغيرة","مرحلة","حلمنا","شجرة","مسجد",
+      "طائرة","مطار","دفتر","حكاية","مغامر","حزين","فرشاة","تجارة","منزل","شباب",
+      "نجاحك","زيارة","شاطئ","لوحة","زراعة","محمول","مخزن","دعوة","شحنة","مغارة",
+      "مطر","زقاق","نظرة","كتابك","تعليم","معدل","دليل","ذكرى","مظهر","كرسي",
+      "ورشة","هدوء","وسيلة","صوتي","مبنى","مفتوح","مغلق","رمادي","حلوى","مشروب"
+    ].map(w => (''+w).replace(/[ءئ]|[\u064B-\u0652]/g,'').slice(0,WORD_LENGTH));
+
+    // ======= DOM & State =======
+    const boardEl = document.getElementById('board');
+    const keyboardEl = document.getElementById('keyboard');
+    const toastEl = document.getElementById('toast');
+    const restartBtn = document.getElementById('restart');
+
+    let grid = Array.from({length: MAX_GUESSES}, () => Array(WORD_LENGTH).fill(''));
+    let currentRow = 0, currentCol = 0;
+    let solution = pickSolution();
+    let gameOver = false;
+
+    function pickSolution(){
+      return WORDS[Math.floor(Math.random()*WORDS.length)] || "مدينة";
+    }
+
+    // ======= واجهة اللوحة والكيبورد =======
+    function createBoard(){
+      boardEl.innerHTML = '';
+      for(let r=0;r<MAX_GUESSES;r++){
+        const row = document.createElement('div'); row.className='row'; row.dataset.row=r;
+        for(let c=0;c<WORD_LENGTH;c++){
+          const tile = document.createElement('div'); tile.className='tile'; tile.dataset.col=c;
+          tile.setAttribute('aria-hidden','true');
+          row.appendChild(tile);
+        }
+        boardEl.appendChild(row);
+      }
+    }
+
+    function createKeyboard(){
+      keyboardEl.innerHTML = '';
+      const rows = [
+        ["ض","ص","ث","ق","ف","غ","ع","ه","خ"],
+        ["ش","س","ي","ب","ل","ا","ت","ن","م"],
+        ["ادخال","ؤ","ر","لا","ى","ة","و","ز","ظ","مسح"]
+      ];
+      rows.forEach(rowArr=>{
+        const r = document.createElement('div'); r.className='krow';
+        rowArr.forEach(key => {
+          const k = document.createElement('div');
+          k.className = 'kbkey' + (key.length>1?' big':'');
+          k.textContent = key;
+          k.dataset.key = key;
+          k.addEventListener('click', ()=> onKey(key));
+          r.appendChild(k);
+        });
+        keyboardEl.appendChild(r);
+      });
+    }
+
+    // ======= التعامل مع الضغطات =======
+    function onKey(key){
+      if(gameOver) return;
+      if(key === 'مسح'){ deleteLetter(); }
+      else if(key === 'ادخال'){ submitGuess(); }
+      else { addLetter(key); }
+    }
+
+    function addLetter(letter){
+      if(currentCol >= WORD_LENGTH) return;
+      letter = letter.replace(/\s+/g,'').replace(/[ءئ]|[\u064B-\u0652]/g,'');
+      if(!letter) return;
+      grid[currentRow][currentCol] = letter;
+      updateTile(currentRow, currentCol, letter);
+      currentCol++;
+    }
+
+    function deleteLetter(){
+      if(currentCol === 0) return;
+      currentCol--;
+      grid[currentRow][currentCol] = '';
+      updateTile(currentRow, currentCol, '');
+    }
+
+    function updateTile(row,col,letter){
+      const rowEl = boardEl.children[row];
+      const tile = rowEl.children[col];
+      tile.textContent = letter || '';
+      tile.classList.toggle('filled', !!letter);
+    }
+
+    // دعم لوحة المفاتيح الحقيقية للعربية: نسمح بحروف عربية الأساسية وإدخال Enter/Backspace
+    document.addEventListener('keydown', (e)=>{
+      if(gameOver) return;
+      if(e.key === 'Enter'){ onKey('ادخال'); e.preventDefault(); return; }
+      if(e.key === 'Backspace'){ onKey('مسح'); e.preventDefault(); return; }
+      // للحروف العربية: نطاق Unicode \u0600-\u06FF
+      if(e.key.length === 1 && /[\u0600-\u06FF]/.test(e.key)){ onKey(e.key); }
+    });
+
+    // ======= التحقّق من التخمين =======
+    function submitGuess(){
+      if(currentCol !== WORD_LENGTH){ showToast('لم تُدخل عدد أحرف كافٍ'); return; }
+      let guess = grid[currentRow].join('').replace(/\s+/g,'').slice(0,WORD_LENGTH);
+      // تطبيع الكلمات (نقارن بنفس المعالجات)
+      const normalized = WORDS; // الكلمات في المصفوفة معدّة مسبقاً
+      if(!normalized.includes(guess)){
+        showToast('هذه الكلمة غير موجودة في قاموس اللعبة');
+        // هزة للصف
+        const rowEl = boardEl.children[currentRow];
+        rowEl.animate([{transform:'translateX(-8px)'},{transform:'translateX(8px)'},{transform:'translateX(0)'}], {duration:300});
+        return;
+      }
+      const evals = evaluateGuess(guess, solution);
+      applyEvaluationToRow(currentRow, evals, guess);
+
+      if(evals.every(e => e === 'correct')){
+        showToast('فزت! الكلمة: ' + solution, 3500);
+        gameOver = true;
+        return;
+      }
+      currentRow++; currentCol = 0;
+      if(currentRow >= MAX_GUESSES){
+        showToast('انتهت المحاولات. الكلمة: ' + solution, 4000);
+        gameOver = true;
+      }
+    }
+
+    function evaluateGuess(guess, sol){
+      const res = Array(WORD_LENGTH).fill('absent');
+      const solArr = sol.split('');
+      for(let i=0;i<WORD_LENGTH;i++){
+        if(guess[i] === solArr[i]){
+          res[i] = 'correct';
+          solArr[i] = null;
+        }
+      }
+      for(let i=0;i<WORD_LENGTH;i++){
+        if(res[i] === 'correct') continue;
+        const idx = solArr.indexOf(guess[i]);
+        if(idx !== -1){
+          res[i] = 'present';
+          solArr[idx] = null;
+        }
+      }
+      return res;
+    }
+
+    function applyEvaluationToRow(row, evaluation, guess){
+      const rowEl = boardEl.children[row];
+      for(let i=0;i<WORD_LENGTH;i++){
+        const tile = rowEl.children[i];
+        tile.classList.add(evaluation[i]);
+        const letter = guess[i];
+        const key = Array.from(keyboardEl.querySelectorAll('.kbkey')).find(k => k.dataset.key === letter || k.textContent === letter);
+        if(key){
+          if(evaluation[i] === 'correct'){ key.classList.remove('present','absent'); key.classList.add('correct'); }
+          else if(evaluation[i] === 'present' && !key.classList.contains('correct')){ key.classList.remove('absent'); key.classList.add('present'); }
+          else if(evaluation[i] === 'absent' && !key.classList.contains('correct') && !key.classList.contains('present')){ key.classList.add('absent'); }
+        }
+      }
+    }
+
+    // ======= toast و إعادة تشغيل =======
+    let toastTimer = null;
+    function showToast(text, duration=2200){
+      toastEl.textContent = text;
+      toastEl.style.display = 'block';
+      if(toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(()=>{ toastEl.style.display='none'; }, duration);
+    }
+
+    restartBtn.addEventListener('click', resetGame);
+    function resetGame(){
+      grid = Array.from({length: MAX_GUESSES}, () => Array(WORD_LENGTH).fill(''));
+      currentRow = 0; currentCol = 0; gameOver = false;
+      solution = pickSolution();
+      createBoard(); createKeyboard(); showToast('انطلقت لعبة جديدة',1000);
+    }
+
+    // ======= init =======
+    function createKeyboard(){ createKeyboard; } // placeholder to satisfy linter if needed
+    createBoard();
+    createKeyboard = (function(){
+      // recreate keyboard function (to avoid hoisting issues)
+      keyboardEl.innerHTML = '';
+      const rows = [
+        ["ض","ص","ث","ق","ف","غ","ع","ه","خ"],
+        ["ش","س","ي","ب","ل","ا","ت","ن","م"],
+        ["ادخال","ؤ","ر","لا","ى","ة","و","ز","ظ","مسح"]
+      ];
+      rows.forEach(rowArr=>{
+        const r = document.createElement('div'); r.className='krow';
+        rowArr.forEach(key => {
+          const k = document.createElement('div');
+          k.className = 'kbkey' + (key.length>1 ? ' big' : '');
+          k.textContent = key;
+          k.dataset.key = key;
+          k.addEventListener('click', ()=> onKey(key));
+          r.appendChild(k);
+        });
+        keyboardEl.appendChild(r);
+      });
+    });
+
+    // run keyboard creator
+    createKeyboard();
+
+    // Expose debug
+    window._debug = { getSolution: ()=> solution, WORDS, grid };
+
+    // ensure accessibility focus
+    boardEl.setAttribute('tabindex','0');
+  </script>
+</body>
+</html>
